@@ -1,4 +1,7 @@
 {
       "editor.formatOnSave": true,
-      "C_Cpp.errorSquiggles": "Disabled"
+      "C_Cpp.errorSquiggles": "Disabled",
+      "files.associations": {
+            "in.h": "c"
+      }
 }

@@ -1,312 +1,173 @@
 #include <stdio.h>
-#include <string.h>
+#include <unistd.h>
 #include <stdlib.h>
-#include <sys/ioctl.h>
+#include <string.h>
 #include <sys/socket.h>
-#include <sys/time.h>
-#include <netinet/in.h>
-#include <errno.h>
+#include <arpa/inet.h>
+#include <sys/fcntl.h>
 
-#define SERVER_PORT  12345
+#define SERVER_PORT 5110
 
-#define TRUE             1
-#define FALSE            0
+// 初始化服务端的监听端口。
+int initserver(int port);
 
-// example from: https://www.ibm.com/docs/en/i/7.1?topic=designs-example-nonblocking-io-select
-
-main (int argc, char *argv[])
+int main(int argc, char *argv[])
 {
-   int    i, len, rc, on = 1;
-   // listen_sd 对应 Server Socket 的文件描述符，
-   int    listen_sd, max_sd, new_sd;
-   int    desc_ready, end_server = FALSE;
-   int    close_conn;
-   char   buffer[80];
-   struct sockaddr_in6   addr;
-   struct timeval       timeout;
-   fd_set master_set, working_set;
+   // 初始化服务端用于监听的socket。
+   int listensock = initserver(SERVER_PORT);
+   printf("listensock=%d\n", listensock);
 
-   /*************************************************************/
-   /* Create an AF_INET6 stream socket to receive incoming      */
-   /* connections on                                            */
-   /*************************************************************/
-   // 首先创建一个 Server Socket，即监听 Socket
-   listen_sd = socket(AF_INET6, SOCK_STREAM, 0);
-   printf("listen_sd is %d\n",listen_sd);
-   if (listen_sd < 0)
+   if (listensock < 0)
    {
-      perror("socket() failed");
-      exit(-1);
+      printf("initserver() failed.\n");
+      return -1;
    }
 
-   /*************************************************************/
-   /* Allow socket descriptor to be reuseable                   */
-   /*************************************************************/
-   rc = setsockopt(listen_sd, SOL_SOCKET,  SO_REUSEADDR,
-                   (char *)&on, sizeof(on));
-   if (rc < 0)
+   fd_set readfdset; // 读事件的集合，包括监听socket和客户端连接上来的socket。
+   int maxfd;        // readfdset中socket的最大值。
+
+   // 初始化结构体，把listensock添加到集合中。
+   FD_ZERO(&readfdset);
+
+   FD_SET(listensock, &readfdset);
+   maxfd = listensock;
+
+   while (1)
    {
-      perror("setsockopt() failed");
-      close(listen_sd);
-      exit(-1);
-   }
+      // 调用 select 函数时，会改变 socket 集合的内容，所以要把 socket 集合保存下来，传一个临时的给 select
+      fd_set tmpfdset = readfdset;
 
-   /*************************************************************/
-   /* Set socket to be nonblocking. All of the sockets for      */
-   /* the incoming connections will also be nonblocking since   */
-   /* they will inherit that state from the listening socket.   */
-   /*************************************************************/
-   rc = ioctl(listen_sd, FIONBIO, (char *)&on);
-   if (rc < 0)
-   {
-      perror("ioctl() failed");
-      close(listen_sd);
-      exit(-1);
-   }
+      int infds = select(maxfd + 1, &tmpfdset, NULL, NULL, NULL);
+      // printf("select infds=%d\n",infds);
 
-   /*************************************************************/
-   /* Bind the socket                                           */
-   /*************************************************************/
-   memset(&addr, 0, sizeof(addr));
-   addr.sin6_family      = AF_INET6;
-   memcpy(&addr.sin6_addr, &in6addr_any, sizeof(in6addr_any));
-   addr.sin6_port        = htons(SERVER_PORT);
-   rc = bind(listen_sd,
-             (struct sockaddr *)&addr, sizeof(addr));
-   if (rc < 0)
-   {
-      perror("bind() failed");
-      close(listen_sd);
-      exit(-1);
-   }
-
-   /*************************************************************/
-   /* Set the listen back log                                   */
-   /*************************************************************/
-   rc = listen(listen_sd, 32);
-   if (rc < 0)
-   {
-      perror("listen() failed");
-      close(listen_sd);
-      exit(-1);
-   }
-
-   /*************************************************************/
-   /* Initialize the master fd_set                              */
-   /*************************************************************/
-   // 将 select 的位图初始化
-   FD_ZERO(&master_set);
-   max_sd = listen_sd;
-   // 将 master_set 位图指定位置 1，相当于向 select 注册此文件描述符
-   FD_SET(listen_sd, &master_set);
-
-   /*************************************************************/
-   /* Initialize the timeval struct to 3 minutes.  If no        */
-   /* activity after 3 minutes this program will end.           */
-   /*************************************************************/
-   timeout.tv_sec  = 3 * 60;
-   timeout.tv_usec = 0;
-
-   /*************************************************************/
-   /* Loop waiting for incoming connects or for incoming data   */
-   /* on any of the connected sockets.                          */
-   /*************************************************************/
-   do
-   {
-      /**********************************************************/
-      /* Copy the master fd_set over to the working fd_set.     */
-      /**********************************************************/
-      memcpy(&working_set, &master_set, sizeof(master_set));
-
-      /**********************************************************/
-      /* Call select() and wait 3 minutes for it to complete.   */
-      /**********************************************************/
-      printf("Waiting on select()...\n");
-      // 开始监听，当文件描述符不存在事件时，main 线程会阻塞于 select 方法
-      rc = select(max_sd + 1, &working_set, NULL, NULL, &timeout);
-
-      /**********************************************************/
-      /* Check to see if the select call failed.                */
-      /**********************************************************/
-      if (rc < 0)
+      // 返回失败。
+      if (infds < 0)
       {
-         perror("  select() failed");
+         printf("select() failed.\n");
+         perror("select()");
          break;
       }
 
-      /**********************************************************/
-      /* Check to see if the 3 minute time out expired.         */
-      /**********************************************************/
-      if (rc == 0)
+      // 超时，在本程序中，select 函数最后一个参数为空，不存在超时的情况，但以下代码还是留着
+      if (infds == 0)
       {
-         printf("  select() timed out.  End program.\n");
-         break;
+         printf("select() timeout.\n");
+         continue;
       }
 
-      /**********************************************************/
-      /* One or more descriptors are readable.  Need to         */
-      /* determine which ones they are.                         */
-      /**********************************************************/
-      // 记录一下文件描述符的个数
-      desc_ready = rc;
-      // 通过遍历文件描述符（从 0 开始直到已知的最大文件描述符编号）
-      for (i=0; i <= max_sd  &&  desc_ready > 0; ++i)
+      // 检查有事情发生的 socket，包括监听和客户端连接的 socket
+      // 这里是客户端的 socket 事件，每次都要遍历整个集合，因为可能有多个 socket 有事件
+      int eventfd;
+      // 下面的 for 循环涉及文件描述符从内核态拷贝到用户态
+      for (eventfd = 0; eventfd <= maxfd; eventfd++)
       {
-         /*******************************************************/
-         /* Check to see if this descriptor is ready            */
-         /*******************************************************/
-         // 依次检查文件描述符是否有事件
-         if (FD_ISSET(i, &working_set))
+         if (FD_ISSET(eventfd, &tmpfdset) <= 0)
+            continue;
+
+         if (eventfd == listensock)
          {
-            /****************************************************/
-            /* A descriptor was found that was readable - one   */
-            /* less has to be looked for.  This is being done   */
-            /* so that we can stop looking at the working set   */
-            /* once we have found all of the descriptors that   */
-            /* were ready.                                      */
-            /****************************************************/
-            desc_ready -= 1;
-
-            /****************************************************/
-            /* Check to see if this is the listening socket     */
-            /****************************************************/
-            if (i == listen_sd)
+            // 如果发生事件的是listensock，表示有新的客户端连上来
+            struct sockaddr_in client;
+            socklen_t len = sizeof(client);
+            int clientsock = accept(listensock, (struct sockaddr *)&client, &len);
+            if (clientsock < 0)
             {
-               printf("  Listening socket is readable\n");
-               /*************************************************/
-               /* Accept all incoming connections that are      */
-               /* queued up on the listening socket before we   */
-               /* loop back and call select again.              */
-               /*************************************************/
-               do
-               {
-                  /**********************************************/
-                  /* Accept each incoming connection.  If       */
-                  /* accept fails with EWOULDBLOCK, then we     */
-                  /* have accepted all of them.  Any other      */
-                  /* failure on accept will cause us to end the */
-                  /* server.                                    */
-                  /**********************************************/
-                  new_sd = accept(listen_sd, NULL, NULL);
-                  printf("new_sd is %d\n",new_sd);
-                  if (new_sd < 0)
-                  {
-                     if (errno != EWOULDBLOCK)
-                     {
-                        perror("  accept() failed");
-                        end_server = TRUE;
-                     }
-                     break;
-                  }
-
-                  /**********************************************/
-                  /* Add the new incoming connection to the     */
-                  /* master read set                            */
-                  /**********************************************/
-                  printf("  New incoming connection - %d\n", new_sd);
-                  FD_SET(new_sd, &master_set);
-                  if (new_sd > max_sd)
-                     max_sd = new_sd;
-
-                  /**********************************************/
-                  /* Loop back up and accept another incoming   */
-                  /* connection                                 */
-                  /**********************************************/
-               } while (new_sd != -1);
+               printf("accept() failed.\n");
+               continue;
             }
 
-            /****************************************************/
-            /* This is not the listening socket, therefore an   */
-            /* existing connection must be readable             */
-            /****************************************************/
-            else
+            printf("client(socket=%d) connected ok.\n", clientsock);
+
+            // 把新的客户端 socket 加入集合，注意这里向 readfdset 加入，而不是向临时的 tmpfdset 加入
+            FD_SET(clientsock, &readfdset);
+
+            if (maxfd < clientsock)
+               maxfd = clientsock;
+
+            continue;
+         }
+         else
+         {
+            // 客户端有数据过来或客户端的 socket 连接被断开
+            char buffer[1024];
+            memset(buffer, 0, sizeof(buffer));
+
+            // 读取客户端的数据：<0 表示读取错误，=0 表示连接已经断开，>0 表示正常读取到的字节数
+            ssize_t isize = read(eventfd, buffer, sizeof(buffer));
+
+            // 发生了错误或 socket 被对方关闭
+            if (isize <= 0)
             {
-               printf("  Descriptor %d is readable\n", i);
-               close_conn = FALSE;
-               /*************************************************/
-               /* Receive all incoming data on this socket      */
-               /* before we loop back and call select again.    */
-               /*************************************************/
-               do
+               printf("client(eventfd=%d) disconnected.\n", eventfd);
+
+               close(eventfd); // 关闭客户端的socket。
+
+               FD_CLR(eventfd, &readfdset); // 从集合中移去客户端的 socket
+
+               // 重新计算 maxfd 的值，注意，只有当 eventfd==maxfd 时才需要计算
+               if (eventfd == maxfd)
                {
-                  /**********************************************/
-                  /* Receive data on this connection until the  */
-                  /* recv fails with EWOULDBLOCK.  If any other */
-                  /* failure occurs, we will close the          */
-                  /* connection.                                */
-                  /**********************************************/
-                  rc = recv(i, buffer, sizeof(buffer), 0);
-                  if (rc < 0)
+                  int ii;
+                  for (ii = maxfd; ii > 0; ii--)
                   {
-                     if (errno != EWOULDBLOCK)
+                     if (FD_ISSET(ii, &readfdset))
                      {
-                        perror("  recv() failed");
-                        close_conn = TRUE;
+                        maxfd = ii;
+                        break;
                      }
-                     break;
                   }
 
-                  /**********************************************/
-                  /* Check to see if the connection has been    */
-                  /* closed by the client                       */
-                  /**********************************************/
-                  if (rc == 0)
-                  {
-                     printf("  Connection closed\n");
-                     close_conn = TRUE;
-                     break;
-                  }
-
-                  /**********************************************/
-                  /* Data was received                          */
-                  /**********************************************/
-                  len = rc;
-                  printf("  %d bytes received\n", len);
-
-                  /**********************************************/
-                  /* Echo the data back to the client           */
-                  /**********************************************/
-                  rc = send(i, buffer, len, 0);
-                  if (rc < 0)
-                  {
-                     perror("  send() failed");
-                     close_conn = TRUE;
-                     break;
-                  }
-
-               } while (TRUE);
-
-               /*************************************************/
-               /* If the close_conn flag was turned on, we need */
-               /* to clean up this active connection.  This     */
-               /* clean up process includes removing the        */
-               /* descriptor from the master set and            */
-               /* determining the new maximum descriptor value  */
-               /* based on the bits that are still turned on in */
-               /* the master set.                               */
-               /*************************************************/
-               if (close_conn)
-               {
-                  close(i);
-                  FD_CLR(i, &master_set);
-                  if (i == max_sd)
-                  {
-                     while (FD_ISSET(max_sd, &master_set) == FALSE)
-                        max_sd -= 1;
-                  }
+                  printf("maxfd=%d\n", maxfd);
                }
-            } /* End of existing connection is readable */
-         } /* End of if (FD_ISSET(i, &working_set)) */
-      } /* End of loop through selectable descriptors */
 
-   } while (end_server == FALSE);
+               continue;
+            }
 
-   /*************************************************************/
-   /* Clean up all of the sockets that are open                 */
-   /*************************************************************/
-   for (i=0; i <= max_sd; ++i)
-   {
-      if (FD_ISSET(i, &master_set))
-         close(i);
+            printf("recv(eventfd=%d,size=%d):%s\n", eventfd, isize, buffer);
+
+            // 把收到的报文发回给客户端。
+            write(eventfd, buffer, strlen(buffer));
+         }
+      }
    }
+
+   return 0;
+}
+
+// 初始化服务端的监听端口。
+int initserver(int port)
+{
+   int sock = socket(AF_INET, SOCK_STREAM, 0);
+   if (sock < 0)
+   {
+      printf("socket() failed.\n");
+      return -1;
+   }
+
+   // Linux如下
+   int opt = 1;
+   unsigned int len = sizeof(opt);
+   setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, len);
+   setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &opt, len);
+
+   struct sockaddr_in servaddr;
+   servaddr.sin_family = AF_INET;
+   servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+   servaddr.sin_port = htons(port);
+
+   if (bind(sock, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
+   {
+      printf("bind() failed.\n");
+      close(sock);
+      return -1;
+   }
+
+   if (listen(sock, 5) != 0)
+   {
+      printf("listen() failed.\n");
+      close(sock);
+      return -1;
+   }
+
+   return sock;
 }
