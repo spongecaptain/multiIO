@@ -74,8 +74,9 @@ int main(int argc, char *argv[])
                   printf("发送：%s", buffer);
             }
 
-            // 第6步：关闭socket，释放资源。
+            // 6. close client socket
             close(clientfd);
       }
+      // 7. close server socket
       close(listenfd);
 }
