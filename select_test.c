@@ -36,7 +36,7 @@ int main(int argc, char *argv[])
    {
       // 调用 select 函数时，会改变 socket 集合的内容，所以要把 socket 集合保存下来，传一个临时的给 select
       fd_set tmpfdset = readfdset;
-
+      // 每次调用 select 都需要将 fd_set 结构体实例从用户态传递到内核态
       int infds = select(maxfd + 1, &tmpfdset, NULL, NULL, NULL);
       // printf("select infds=%d\n",infds);
 
@@ -58,7 +58,7 @@ int main(int argc, char *argv[])
       // 检查有事情发生的 socket，包括监听和客户端连接的 socket
       // 这里是客户端的 socket 事件，每次都要遍历整个集合，因为可能有多个 socket 有事件
       int eventfd;
-      // 下面的 for 循环涉及文件描述符从内核态拷贝到用户态
+      // 这种遍历效率并不高，因为当 Socket 较多时，大多文件描述符并没有发生事件
       for (eventfd = 0; eventfd <= maxfd; eventfd++)
       {
          if (FD_ISSET(eventfd, &tmpfdset) <= 0)
