@@ -17,19 +17,22 @@
 main (int argc, char *argv[])
 {
    int    i, len, rc, on = 1;
+   // listen_sd 对应 Server Socket 的文件描述符，
    int    listen_sd, max_sd, new_sd;
    int    desc_ready, end_server = FALSE;
    int    close_conn;
    char   buffer[80];
    struct sockaddr_in6   addr;
    struct timeval       timeout;
-   fd_set        master_set, working_set;
+   fd_set master_set, working_set;
 
    /*************************************************************/
    /* Create an AF_INET6 stream socket to receive incoming      */
    /* connections on                                            */
    /*************************************************************/
+   // 首先创建一个 Server Socket，即监听 Socket
    listen_sd = socket(AF_INET6, SOCK_STREAM, 0);
+   printf("listen_sd is %d\n",listen_sd);
    if (listen_sd < 0)
    {
       perror("socket() failed");
@@ -91,8 +94,10 @@ main (int argc, char *argv[])
    /*************************************************************/
    /* Initialize the master fd_set                              */
    /*************************************************************/
+   // 将 select 的位图初始化
    FD_ZERO(&master_set);
    max_sd = listen_sd;
+   // 将 master_set 位图指定位置 1，相当于向 select 注册此文件描述符
    FD_SET(listen_sd, &master_set);
 
    /*************************************************************/
@@ -117,6 +122,7 @@ main (int argc, char *argv[])
       /* Call select() and wait 3 minutes for it to complete.   */
       /**********************************************************/
       printf("Waiting on select()...\n");
+      // 开始监听，当文件描述符不存在事件时，main 线程会阻塞于 select 方法
       rc = select(max_sd + 1, &working_set, NULL, NULL, &timeout);
 
       /**********************************************************/
@@ -141,12 +147,15 @@ main (int argc, char *argv[])
       /* One or more descriptors are readable.  Need to         */
       /* determine which ones they are.                         */
       /**********************************************************/
+      // 记录一下文件描述符的个数
       desc_ready = rc;
+      // 通过遍历文件描述符（从 0 开始直到已知的最大文件描述符编号）
       for (i=0; i <= max_sd  &&  desc_ready > 0; ++i)
       {
          /*******************************************************/
          /* Check to see if this descriptor is ready            */
          /*******************************************************/
+         // 依次检查文件描述符是否有事件
          if (FD_ISSET(i, &working_set))
          {
             /****************************************************/
@@ -179,6 +188,7 @@ main (int argc, char *argv[])
                   /* server.                                    */
                   /**********************************************/
                   new_sd = accept(listen_sd, NULL, NULL);
+                  printf("new_sd is %d\n",new_sd);
                   if (new_sd < 0)
                   {
                      if (errno != EWOULDBLOCK)
