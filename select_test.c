@@ -123,7 +123,7 @@ int main(int argc, char *argv[])
                continue;
             }
 
-            printf("recv(eventfd=%d,size=%d):%s\n", eventfd, isize, buffer);
+            printf("recv(eventfd=%d,size=%ld):%s\n", eventfd, isize, buffer);
 
             // 把收到的报文发回给客户端。
             write(eventfd, buffer, strlen(buffer));
