@@ -6,7 +6,7 @@ Step1: Build
 
 ```bash
 # take select_test.c as example
-gcc -o select select_test.c
+gcc -o select select_test.c server_socket_init.c
 ```
 
 Step2: Run Server

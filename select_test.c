@@ -6,14 +6,13 @@
 #include <arpa/inet.h>
 #include <sys/fcntl.h>
 
-#define SERVER_PORT 5110
+#define SERVER_PORT 5110 // server socket 端口定义
 
-// 初始化服务端的监听端口。
 int initserver(int port);
 
 int main(int argc, char *argv[])
 {
-   // 初始化服务端用于监听的socket。
+   // 初始化服务端用于监听的 socket
    int listensock = initserver(SERVER_PORT);
    printf("listensock=%d\n", listensock);
 
@@ -23,10 +22,10 @@ int main(int argc, char *argv[])
       return -1;
    }
 
-   fd_set readfdset; // 读事件的集合，包括监听socket和客户端连接上来的socket。
-   int maxfd;        // readfdset中socket的最大值。
+   fd_set readfdset; // 读事件的集合，包括监听 socket 和客户端连接上来的 socket
+   int maxfd;        // readfdset 中 socket 的最大值
 
-   // 初始化结构体，把listensock添加到集合中。
+   // 初始化结构体，把 listensock 添加到集合中
    FD_ZERO(&readfdset);
 
    FD_SET(listensock, &readfdset);
@@ -38,9 +37,8 @@ int main(int argc, char *argv[])
       fd_set tmpfdset = readfdset;
       // 每次调用 select 都需要将 fd_set 结构体实例从用户态传递到内核态
       int infds = select(maxfd + 1, &tmpfdset, NULL, NULL, NULL);
-      // printf("select infds=%d\n",infds);
 
-      // 返回失败。
+      // 返回失败
       if (infds < 0)
       {
          printf("select() failed.\n");
@@ -61,6 +59,7 @@ int main(int argc, char *argv[])
       // 这种遍历效率并不高，因为当 Socket 较多时，大多文件描述符并没有发生事件
       for (eventfd = 0; eventfd <= maxfd; eventfd++)
       {
+         // FD_ISSET 参考 select 中位图的相关宏命令
          if (FD_ISSET(eventfd, &tmpfdset) <= 0)
             continue;
 
@@ -100,7 +99,7 @@ int main(int argc, char *argv[])
             {
                printf("client(eventfd=%d) disconnected.\n", eventfd);
 
-               close(eventfd); // 关闭客户端的socket。
+               close(eventfd); // 关闭客户端的socket
 
                FD_CLR(eventfd, &readfdset); // 从集合中移去客户端的 socket
 
@@ -125,49 +124,10 @@ int main(int argc, char *argv[])
 
             printf("recv(eventfd=%d,size=%ld):%s\n", eventfd, isize, buffer);
 
-            // 把收到的报文发回给客户端。
+            // 把收到的报文发回给客户端
             write(eventfd, buffer, strlen(buffer));
          }
       }
    }
-
    return 0;
-}
-
-// 初始化服务端的监听端口。
-int initserver(int port)
-{
-   int sock = socket(AF_INET, SOCK_STREAM, 0);
-   if (sock < 0)
-   {
-      printf("socket() failed.\n");
-      return -1;
-   }
-
-   // Linux如下
-   int opt = 1;
-   unsigned int len = sizeof(opt);
-   setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, len);
-   setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &opt, len);
-
-   struct sockaddr_in servaddr;
-   servaddr.sin_family = AF_INET;
-   servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-   servaddr.sin_port = htons(port);
-
-   if (bind(sock, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
-   {
-      printf("bind() failed.\n");
-      close(sock);
-      return -1;
-   }
-
-   if (listen(sock, 5) != 0)
-   {
-      printf("listen() failed.\n");
-      close(sock);
-      return -1;
-   }
-
-   return sock;
 }
