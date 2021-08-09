@@ -10,7 +10,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 // 注意事项：epoll 不同于 select 以及 poll 在 Linux 与 Mac 上都有，epoll 并不能在 Mac 等系统上编译通过
-// MAXEVENTS 配置取决于具体应用的需求
+// MAXEVENTS 配置取决于具体应用的需求，但通常不会很大，100 左右
 #define MAXEVENTS 128
 #define PORT 5110
 // 把 socket 设置为非阻塞的方式
